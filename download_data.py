@@ -2,6 +2,7 @@ import re
 import requests
 
 from bs4 import BeautifulSoup
+from collections import namedtuple
 from typing import Any
 
 
@@ -19,20 +20,67 @@ def get_offers_urls() -> list[str]:
 def get_offer_data(offer_url: str) -> dict[str, Any]:
     offer_data = {}
     url = BASE_URL + offer_url
-    parser = BeautifulSoup(requests.get(url, headers=HEADERS).text, 'html.parser')
-    area = parser.find('div', attrs={'data-testid':'table-value-area'}).text
-    rooms_num = parser.find('a', attrs={'class':'css-19yhkv9 enb64yk0'}).text
-    floor = parser.find('div', attrs={'data-testid':'table-value-floor'}).text
+    response = requests.get(url, headers=HEADERS)
+    if response.status_code == 200:
+        parser = BeautifulSoup(response.text, 'html.parser')
 
-    offer_data.update(area=re.search(r'\d+[,|.]?\d*', area)[0])
-    offer_data.update(rooms_num=rooms_num)
-    offer_data.update(floor=floor)
-    print(offer_data)
+        decimal_number_regex = r'\d+[,|.]?\d*'
+        Field = namedtuple('Field', ['name', 'tag', 'attr_name', 'attr_value', 'regex'])
+
+        fields = [
+            Field('area', 'div', 'data-testid', 'table-value-area', decimal_number_regex),
+            Field('rooms_num', 'div', 'data-testid', 'table-value-rooms_num', None),
+            Field('floor', 'div', 'data-testid', 'table-value-floor', None),
+            Field('rent', 'div', 'data-testid', 'table-value-rent', decimal_number_regex),
+            Field('online_service', 'div', 'aria-label', 'Obsługa zdalna', None),
+            Field('building_ownership', 'div', 'data-testid', 'table-value-building_ownership', None),
+            Field('construction_status', 'div', 'data-testid', 'table-value-construction_status', None),
+            Field('outdoor', 'div', 'data-testid', 'table-value-outdoor', None),
+            Field('car_park', 'div', 'data-testid', 'table-value-car', None),
+            Field('heating', 'div', 'data-testid', 'table-value-heating', None),
+
+            Field('market', 'div', 'data-testid', 'table-value-market', None),
+            Field('advertiser_type', 'div', 'data-testid', 'table-value-advertiser_type', None),
+            Field('free_from', 'div', 'data-testid', 'table-value-free_from', None),
+            Field('build_year', 'div', 'data-testid', 'table-value-build_year', None),
+            Field('building_type', 'div', 'data-testid', 'table-value-building_type', None),
+            Field('windows_type', 'div', 'data-testid', 'table-value-windows_type', None),
+            Field('media_types', 'div', 'data-testid', 'table-value-media_types', None),
+            Field('security_types', 'div', 'data-testid', 'table-value-security_types', None),
+            Field('equipment_types', 'div', 'data-testid', 'table-value-equipment_types', None),
+            Field('building_material', 'div', 'data-testid', 'table-value-building_material', None),
+
+            Field('address', 'a', 'aria-label', 'Adres', None),
+        ]
+
+        for field in fields:
+            try:
+                element = parser.find(field.tag, attrs={field.attr_name: field.attr_value})
+                if element:
+                    if field.name == 'online_service':
+                        offer_data[field.name] = element.find('div', attrs={'class': 'css-1wi2w6s enb64yk5'}).text.strip()
+                    elif field.name in ['rooms_num', 'market']:
+                        offer_data[field.name] = element.find('a', attrs={'class': 'css-19yhkv9 enb64yk0'}).text.strip()
+                    elif field.name == 'address':
+                        address = element.text.split(',')
+                        offer_data['street'] = address[0].strip() if address[0].strip().startswith('ul.') else None
+                    elif getattr(field, 'regex'):
+                        offer_data[field.name] = re.search(field.regex, element.text).group()
+                    else:
+                        offer_data[field.name] = element.text.strip()
+                else:
+                    offer_data[field.name] = None
+            except AttributeError:
+                offer_data[field.name] = None
+
+        print(offer_data)
+    return offer_data
 
 
-print(OFFERS_URL, '')
 offers_urls = get_offers_urls()
 print(len(offers_urls))
 
-print(BASE_URL + offers_urls[0])
-get_offer_data(offers_urls[0])
+
+for url in offers_urls[:10]:
+    print(BASE_URL + url)
+    get_offer_data(url)
