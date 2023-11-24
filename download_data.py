@@ -1,6 +1,5 @@
 import asyncio
 import re
-import requests
 import time
 
 from aiohttp import ClientSession
@@ -10,7 +9,7 @@ from typing import Any
 
 
 BASE_URL = "https://www.otodom.pl"
-OFFERS_URL = BASE_URL + "/pl/wyniki/sprzedaz/mieszkanie/opolskie?limit=36&ownerTypeSingleSelect=ALL&by=DEFAULT&direction=DESC&viewType=listing"
+OFFERS_URL = BASE_URL + "/pl/wyniki/sprzedaz/mieszkanie/opolskie?viewType=listing&limit=72"
                                          
 HEADERS = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0'}
 
@@ -44,10 +43,21 @@ FIELDS = [
 ]
 
 
+async def get_offers_pages_urls(session: ClientSession, url: str) -> list[str]:
+    async with session.get(url, headers=HEADERS) as response:
+        if response.status == 200:
+            parser = BeautifulSoup(await response.text(), 'html.parser')
+            pagination = parser.find('nav', attrs={'data-cy':'pagination'})
+            available_pages = pagination.find_all('a', attrs={'class':'eo9qioj1 css-5tvc2l edo3iif1'})
+            last_page_number = max([int(page.text) for page in available_pages]) if available_pages else 1
+            return [f"{url}&page={number}" for number in range(1, last_page_number + 1)]
 
-def get_offers_urls(url: str) -> list[str]:
-    parser = BeautifulSoup(requests.get(url, headers=HEADERS).text, 'html.parser')
-    offers = parser.find_all('a', attrs={'data-cy':'listing-item-link'})
+
+async def get_offers_urls_from_page(session: ClientSession, url: str) -> list[str]:            
+    async with session.get(url, headers=HEADERS) as response:
+        if response.status == 200:
+            parser = BeautifulSoup(await response.text(), 'html.parser')
+            offers = parser.find_all('a', attrs={'data-cy':'listing-item-link'})
     return [offer['href'] for offer in offers]
 
 
@@ -79,20 +89,35 @@ async def get_offer_data(session: ClientSession, offer_url: str) -> dict[str, An
         return offer_data
 
 
-async def get_all_offers_data(urls) -> list[dict]:
+async def get_offers_urls_from_all_pages(url: str) -> list[dict]:
+    async with ClientSession() as session:
+        pages_urls = await get_offers_pages_urls(session, url)
+        print(len(pages_urls))
+        tasks = [get_offers_urls_from_page(session, url) for url in pages_urls]
+        return await asyncio.gather(*tasks)
+
+
+async def get_offers_data(urls: list[str]) -> list[dict]:
     async with ClientSession() as session:
         tasks = [get_offer_data(session, url) for url in urls]
         return await asyncio.gather(*tasks)
 
 
 async def main():
-    offers_urls = get_offers_urls(OFFERS_URL)
-    all_offers_data = await get_all_offers_data(offers_urls)
-    print(type(all_offers_data))
-    for data in all_offers_data:
-        print(data)
+    offers_urls = await get_offers_urls_from_all_pages(OFFERS_URL)
+    offers_urls_flat = list(set([url for urls in offers_urls for url in urls]))
+    offers_data = await get_offers_data(offers_urls_flat)
+    print(len(offers_urls_flat))
+    print(len(offers_data))
 
 
 start_time = time.time()
 asyncio.run(main())
 print(f'ELAPSED TIME: {time.time() - start_time}')
+
+"""
+20
+1247
+1247
+ELAPSED TIME: 47.78603482246399
+"""
