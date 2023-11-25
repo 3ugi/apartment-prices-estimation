@@ -79,7 +79,8 @@ async def get_offers_urls_from_page(session: ClientSession, url: str) -> list[st
     async with session.get(url, headers=HEADERS) as response:
         if response.status == 200:
             parser = BeautifulSoup(await response.text(), 'html.parser')
-            offers = parser.find_all('a', attrs={'data-cy':'listing-item-link'})
+            offers_listing = parser.find('div', attrs={'data-cy':'search.listing.organic'})
+            offers = offers_listing.find_all('a', attrs={'data-cy':'listing-item-link'}) if offers_listing else []
     return [offer['href'] for offer in offers]
 
 
@@ -125,12 +126,14 @@ async def get_offers_data(urls: list[str]) -> list[dict]:
         tasks = [get_offer_data(session, url) for url in urls]
         return await asyncio.gather(*tasks)
 
-
+# cities_offers_urls = [
+#     "https://www.otodom.pl/pl/wyniki/sprzedaz/mieszkanie/lodzkie/zgierski/aleksandrow-lodzki/aleksandrow-lodzki?limit=72"
+# ]
 async def main():
-    for city_offers_url in cities_offers_urls[:10]:
+    for city_offers_url in cities_offers_urls:
         print(city_offers_url)
         offers_urls = await get_offers_urls_from_all_pages(city_offers_url)
-        offers_urls_flat = list(set([url for urls in offers_urls for url in urls]))
+        offers_urls_flat = [url for urls in offers_urls for url in urls]
         offers_data = await get_offers_data(offers_urls_flat)
         print(len(offers_urls_flat))
         print(len(offers_data))
