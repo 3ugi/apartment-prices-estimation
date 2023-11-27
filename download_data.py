@@ -5,45 +5,11 @@ import time
 
 from aiohttp import ClientSession
 from bs4 import BeautifulSoup
-from collections import namedtuple
-from unidecode import unidecode
+from more_itertools import chunked
 from typing import Any
 
-
-BASE_URL = "https://www.otodom.pl"
-OFFERS_BASE_URL = f"{BASE_URL}/pl/wyniki/sprzedaz/mieszkanie"
-ENTRIES_PER_PAGE = 72
-
-HEADERS = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0'}
-
-DECIMAL_NUMBER_REGEX = r'\d+[,|.]?\d*'
-Field = namedtuple('Field', ['name', 'tag', 'attr_name', 'attr_value', 'regex'])
-
-FIELDS = [
-    Field('area', 'div', 'data-testid', 'table-value-area', DECIMAL_NUMBER_REGEX),
-    Field('rooms_num', 'div', 'data-testid', 'table-value-rooms_num', None),
-    Field('floor', 'div', 'data-testid', 'table-value-floor', None),
-    Field('rent', 'div', 'data-testid', 'table-value-rent', DECIMAL_NUMBER_REGEX),
-    Field('online_service', 'div', 'aria-label', 'Obsługa zdalna', None),
-    Field('building_ownership', 'div', 'data-testid', 'table-value-building_ownership', None),
-    Field('construction_status', 'div', 'data-testid', 'table-value-construction_status', None),
-    Field('outdoor', 'div', 'data-testid', 'table-value-outdoor', None),
-    Field('car_park', 'div', 'data-testid', 'table-value-car', None),
-    Field('heating', 'div', 'data-testid', 'table-value-heating', None),
-
-    Field('market', 'div', 'data-testid', 'table-value-market', None),
-    Field('advertiser_type', 'div', 'data-testid', 'table-value-advertiser_type', None),
-    Field('free_from', 'div', 'data-testid', 'table-value-free_from', None),
-    Field('build_year', 'div', 'data-testid', 'table-value-build_year', None),
-    Field('building_type', 'div', 'data-testid', 'table-value-building_type', None),
-    Field('windows_type', 'div', 'data-testid', 'table-value-windows_type', None),
-    Field('media_types', 'div', 'data-testid', 'table-value-media_types', None),
-    Field('security_types', 'div', 'data-testid', 'table-value-security_types', None),
-    Field('equipment_types', 'div', 'data-testid', 'table-value-equipment_types', None),
-    Field('building_material', 'div', 'data-testid', 'table-value-building_material', None),
-
-    Field('address', 'a', 'aria-label', 'Adres', None),
-]
+from config import BASE_URL, FIELDS, HEADERS
+from utils import flatten_list, process_row
 
 
 df = pd.read_csv(
@@ -54,15 +20,7 @@ df.drop(columns=['registry_id', 'suffix', 'adjective'], inplace=True)
 df = df[df['type'] == 'miasto'].reset_index(drop=True)
 
 
-def _process_row(row):
-    voivodeship = unidecode(row['voivodeship']).lower()
-    powiat = '-'.join(unidecode(row['powiat']).lower().split())
-    gmina = '-'.join(unidecode(row['gmina']).lower().split())
-    city = '-'.join(unidecode(row['name']).lower().split())
-    return OFFERS_BASE_URL + f"/{voivodeship}/{powiat}/{gmina}/{city}" + f"?limit={ENTRIES_PER_PAGE}"
-
-
-cities_offers_urls = df.apply(_process_row, axis=1)
+cities_offers_urls = df.apply(process_row, axis=1)
 
 
 async def get_offers_pages_urls(session: ClientSession, url: str) -> list[str]:
@@ -75,13 +33,18 @@ async def get_offers_pages_urls(session: ClientSession, url: str) -> list[str]:
             return [f"{url}&page={number}" for number in range(1, last_page_number + 1)]
 
 
-async def get_offers_urls_from_page(session: ClientSession, url: str) -> list[str]:            
+async def get_offers_urls_from_page(session: ClientSession, url: str) -> list[str]:
+    url_splitted = url.split('/')
+    voivodeship = url_splitted[-4]
+    powiat = url_splitted[-3]
+    gmina = url_splitted[-2]
+    city = url_splitted[-1].split('?')[0]            
     async with session.get(url, headers=HEADERS) as response:
         if response.status == 200:
             parser = BeautifulSoup(await response.text(), 'html.parser')
             offers_listing = parser.find('div', attrs={'data-cy':'search.listing.organic'})
             offers = offers_listing.find_all('a', attrs={'data-cy':'listing-item-link'}) if offers_listing else []
-    return [offer['href'] for offer in offers]
+    return [(voivodeship, powiat, gmina, city, offer['href']) for offer in offers]
 
 
 async def get_offer_data(session: ClientSession, offer_url: str) -> dict[str, Any]:
@@ -100,7 +63,8 @@ async def get_offer_data(session: ClientSession, offer_url: str) -> dict[str, An
                             offer_data[field.name] = element.find('a', attrs={'class': 'css-19yhkv9 enb64yk0'}).text.strip()
                         elif field.name == 'address':
                             address = element.text.split(',')
-                            offer_data['street'] = address[0].strip() if address[0].strip().startswith('ul.') else None
+                            is_street = address[0].strip().startswith('ul.') or address[0].strip().startswith('al.') 
+                            offer_data['street'] = address[0].strip() if is_street else None
                         elif getattr(field, 'regex'):
                             offer_data[field.name] = re.search(field.regex, element.text).group()
                         else:
@@ -112,13 +76,19 @@ async def get_offer_data(session: ClientSession, offer_url: str) -> dict[str, An
         return offer_data
 
 
-async def get_offers_urls_from_all_pages(url: str) -> list[dict]:
+async def get_offers_urls_from_all_pages(url: str) -> list[list]:
     async with ClientSession() as session:
         pages_urls = await get_offers_pages_urls(session, url)
         len_pages_urls = len(pages_urls) if pages_urls else 0
+        print(url)
         print(len_pages_urls)
         tasks = [get_offers_urls_from_page(session, url) for url in pages_urls] if pages_urls else []
         return await asyncio.gather(*tasks)
+
+
+async def get_all_offers_urls(urls: list[str]) -> list[list]:
+    tasks = [get_offers_urls_from_all_pages(url) for url in urls]
+    return await asyncio.gather(*tasks)
 
 
 async def get_offers_data(urls: list[str]) -> list[dict]:
@@ -126,26 +96,42 @@ async def get_offers_data(urls: list[str]) -> list[dict]:
         tasks = [get_offer_data(session, url) for url in urls]
         return await asyncio.gather(*tasks)
 
-# cities_offers_urls = [
-#     "https://www.otodom.pl/pl/wyniki/sprzedaz/mieszkanie/lodzkie/zgierski/aleksandrow-lodzki/aleksandrow-lodzki?limit=72"
-# ]
+
 async def main():
-    for city_offers_url in cities_offers_urls:
-        print(city_offers_url)
-        offers_urls = await get_offers_urls_from_all_pages(city_offers_url)
-        offers_urls_flat = [url for urls in offers_urls for url in urls]
-        offers_data = await get_offers_data(offers_urls_flat)
+    cities_offers_urls_chunked = chunked(cities_offers_urls, 5)
+    for offers_urls_chunk in cities_offers_urls_chunked:
+        offers_urls = await get_all_offers_urls(offers_urls_chunk)
+        offers_urls_flat = flatten_list(offers_urls)
         print(len(offers_urls_flat))
-        print(len(offers_data))
+        filename = f'offers_urls_{time.time()}.txt'
+        with open(filename, 'w') as f:
+            for url in offers_urls_flat:
+                f.write(f'{url}\n')
+        print("DELAYING EXECUTION TO LIMIT NUMBER OF REQUESTS...")
+        time.sleep(180)
+        print("RESUMING EXECUTION...")
+    # offers_data = await get_offers_data(offers_urls_flat)
+    # print(len(offers_data))
 
 
 start_time = time.time()
 asyncio.run(main())
-print(f'ELAPSED TIME: {time.time() - start_time}')
+
+# filename = 'offers_urls.txt'
+# with open(filename, 'r') as f:
+#     offers_urls = [line.strip() for line in f]
+# print(len(offers_urls))
+
+elapsed_time_sec = time.time() - start_time
+print(f'ELAPSED TIME [SEC]: {round(elapsed_time_sec)}')
+print(f'ELAPSED TIME [MIN]: {round(elapsed_time_sec / 60, 1)}')
 
 """
-PAGES URLS: 20
 OFFERS URLSFLAT: 1247
 OFFERS DATA: 1247
 ELAPSED TIME: 47.78603482246399
+
+7308
+7308
+ELAPSED TIME: 243.62670183181763
 """
