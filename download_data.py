@@ -18,6 +18,16 @@ throttler = Throttler(rate_limit=10, period=1)
 
 
 async def get_offers_pages_urls(session: ClientSession, url: str) -> list[str]:
+    """
+    Fetches URLs for all pages containing offers from the provided URL.
+
+    Args:
+        session: aiohttp ClientSession for HTTP requests.
+        url: URL to scrape for offer pages.
+
+    Returns:
+        list[str]: List of URLs for each page containing offers.
+    """
     async with session.get(url, headers=HEADERS) as response:
         if response.status == 200:
             parser = BeautifulSoup(await response.text(), 'html.parser')
@@ -28,6 +38,16 @@ async def get_offers_pages_urls(session: ClientSession, url: str) -> list[str]:
 
 
 async def get_offers_urls_from_page(session: ClientSession, url: str) -> list[str]:
+    """
+    Extracts URLs for individual offers from a specific page.
+
+    Args:
+        session: aiohttp ClientSession for HTTP requests.
+        url: URL of the page containing offers.
+
+    Returns:
+        list[str]: List of URLs for individual housing offers on the page.
+    """
     async with throttler:
         try:
             async with session.get(url, headers=HEADERS) as response:
@@ -43,6 +63,15 @@ async def get_offers_urls_from_page(session: ClientSession, url: str) -> list[st
 
 
 async def get_offers_urls_from_all_pages(url: str) -> list[list]:
+    """
+    Gathers URLs for offers from all pages available for a given URL.
+
+    Args:
+        url: URL for scraping offers.
+
+    Returns:
+        list[list]: List of lists containing URLs for individual offers across all pages.
+    """
     async with ClientSession() as session:
         pages_urls = await get_offers_pages_urls(session, url)
         tasks = [get_offers_urls_from_page(session, url) for url in pages_urls]
@@ -50,6 +79,16 @@ async def get_offers_urls_from_all_pages(url: str) -> list[list]:
 
 
 async def get_offer_data(session: ClientSession, offer_url: str) -> dict[str, Any]:
+    """
+    Extracts detailed information for a specific housing offer.
+
+    Args:
+        session: aiohttp ClientSession for HTTP requests.
+        offer_url: URL of the individual housing offer.
+
+    Returns:
+        dict[str, Any]: Dictionary containing detailed information about the housing offer.
+    """
     offer_data = {}
     url = BASE_URL + offer_url
     async with throttler:
@@ -65,6 +104,7 @@ async def get_offer_data(session: ClientSession, offer_url: str) -> dict[str, An
                             script_tag_text = script_tag_text.replace(old, new)
                         script_tag_dict = eval(script_tag_text)
 
+                        # Extracting various details from the script tag data:
                         address = script_tag_dict['props']['pageProps']['ad']['location']['address']
                         street = unidecode(address['street']['name']) if address['street'] else None
                         offer_data.update(street=street)
@@ -114,13 +154,31 @@ async def get_offer_data(session: ClientSession, offer_url: str) -> dict[str, An
 
 
 async def get_offers_data(urls: list[str]) -> list[dict]:
+    """
+    Retrieves detailed information for a list of housing offer URLs.
+
+    Parameters:
+        urls: List of URLs for individual housing offers.
+
+    Returns:
+        list[dict]: List of dictionaries containing detailed information about each housing offer.
+    """
     async with ClientSession() as session:
         tasks = [get_offer_data(session, url) for url in urls]
         return await asyncio.gather(*tasks)
 
 
 async def main():
-    
+    """
+    Orchestrates the scraping and processing of housing offer data for different voivodeships.
+
+    This function iterates through each voivodeship, retrieves housing offer URLs, divides them into manageable chunks,
+    retrieves offer data asynchronously, and saves the data into separate files per voivodeship and chunk.
+
+    Note:
+        Utilizes async operations for concurrent data retrieval.
+        Manages delays to limit the number of requests and prevent overwhelming the server.
+    """
     for voivodeship in VOIVODESHIPS:
         start_time = time.time()
         voivodeship_offers_url = VOIVODESHIP_OFFERS_URL.format(voivodeship=voivodeship)
