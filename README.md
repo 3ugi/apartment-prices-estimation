@@ -15,5 +15,17 @@ Divided into several sections:
 - **Data Collection**: Downloads and merges data into one file.
 - **Data Cleaning & Preparation**: Handles missing values and prepares data for analysis.
 - **Exploratory Data Analysis (EDA)**: Examines distributions, outliers, and correlations.
-- **Feature Engineering**: Creates new features, scales data, encodes categorical variables, and selects relevant features.
+- **Data Preprocessing**: Creates new features, scales data, encodes categorical variables, and selects relevant features.
 - **Model Building & Evaluation**: Implements Linear Regression and XGBoost Regressor models for price prediction.
+
+### polish-housing-price-modeling-pipelines.ipynb
+
+A Jupyter Notebook automating essential aspects of **Data Preprocessing** and **Model Building & Evaluation** steps.
+
+These notebooks together form a comprehensive workflow for collecting, processing, analyzing, and modeling housing price data in Poland.
+
+#### Additional Files: 
+
+The following files are available in the **data.tar.gz** archive:
+- **offers_data.txt**: Contains detailed information about individual housing offers.
+- **cities_data.txt**: Provides data regarding various cities and their attributes.
