@@ -18,11 +18,9 @@ Divided into several sections:
 - **Data Preprocessing**: Creates new features, scales data, encodes categorical variables, and selects relevant features.
 - **Model Building & Evaluation**: Implements Linear Regression and XGBoost Regressor models for price prediction.
 
-### polish-housing-price-modeling-pipelines.ipynb
+### polish-housing-price-modeling-workshop.ipynb (in progress)
 
-A Jupyter Notebook automating essential aspects of **Data Preprocessing** and **Model Building & Evaluation** steps.
-
-These notebooks together form a comprehensive workflow for collecting, processing, analyzing, and modeling housing price data in Poland.
+A Jupyter Notebook aiming to automate essential aspects of **Data Preprocessing** and **Model Building & Evaluation** steps, currently a work in progress.
 
 #### Additional Files: 
 
